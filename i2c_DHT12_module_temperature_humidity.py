@@ -1,5 +1,6 @@
 import ctypes
 import os
+import time
 
 os.system('cls' if os.name == 'nt' else 'clear')  # Clear the console screen at the beginning
 
@@ -48,44 +49,40 @@ class USBI2C:
             ch347_dll.CH347CloseDevice(self.dev_index)
             print(f"Closed device at index: {self.dev_index}")
 
-    def scan_i2c_bus(self):
-        print("Scanning I2C bus...")
-        grid = [['  ' for _ in range(16)] for _ in range(8)]
-        found_devices = []
-
-        for address in range(0x0, 0x80):  # Scan I2C address range
-            write_buffer = (ctypes.c_ubyte * 1)(address << 1)  # Address as 7-bit write address
-            read_buffer = (ctypes.c_ubyte * 1)()
+    def read_dht12(self):
+            address=0x5c
+            write_buffer = (ctypes.c_ubyte * 2)(address << 1,0x00)  # Address as 7-bit write address
+            read_buffer = (ctypes.c_ubyte * 5)()
             ack_num = ctypes.c_ulong()
-
             # Attempt to write a dummy command to see if the device acknowledges
-            result = ch347_dll.CH347StreamI2C_RetACK(self.dev_index, 1, write_buffer, 0, read_buffer , ctypes.byref(ack_num))
-
-            if (result == 1) and (ack_num.value != 0):  # Non-zero indicates a device was acknowledged
-                grid[address // 16][address % 16] = '*  '
-                found_devices.append(address)
+            result = ch347_dll.CH347StreamI2C_RetACK(self.dev_index, 2, write_buffer, 5, read_buffer , ctypes.byref(ack_num))
+            # 校验数据
+            if (result != 1) :
+                return None, None, None, None
+            if ((read_buffer[0] + read_buffer[1] +read_buffer[2]+read_buffer[3]) & 0xFF == read_buffer[4]):
+                return read_buffer[0],read_buffer[1],read_buffer[2],read_buffer[3]
             else:
-                grid[address // 16][address % 16] = '-  '            
+                return None, None, None, None
 
-        print("\nI2C Address Grid (marked with * where devices are found):")
-        print("    " + "  ".join(f"{x:02X}" for x in range(16)))
-        for i, row in enumerate(grid):
-            print(f"{i * 16:02X}: " + " ".join(row))
-
-        if found_devices:
-            found_devices_str = ", ".join(f"0x{addr:02X}" for addr in found_devices)
-            print(f"\nFound Device(s) at Address: {found_devices_str}")
 
 def main():
-    try:
-        # Initialize the I2C device
-        i2c_device = USBI2C(usb_dev_index=0)  # Adjust the index if necessary
-        i2c_device.scan_i2c_bus()
+    # Initialize the I2C device
+    i2c_device = USBI2C(usb_dev_index=0)  # Adjust the index if necessary
+    while True:
+        try:
+            time.sleep(2)  # 等待2秒再次读取
+            hum1, hum2,temp1 ,temp2 = i2c_device.read_dht12()
+            if hum1 is not None and temp1 is not None and hum2 is not None and temp2 is not None:     
+                print("湿度: %d.%d " % (hum1, hum2), end=' ')
+                print("温度: %d.%d ℃" % (temp1, temp2))
+            else:
+                print("读取失败")
+                break
+        except Exception as e:
+            print(f"An error occurred: {e}")
+            break
+    i2c_device.close_device()
 
-    except Exception as e:
-        print(f"An error occurred: {e}")
-    finally:
-        i2c_device.close_device()
 
 if __name__ == "__main__":
     main()
